@@ -20,9 +20,9 @@ pip_netif::pip_netif() {
     this->_identifer = 0;
     this->_isn = 1;
     
-    this->output_callback = NULL;
-    this->output_tcp_callback = NULL;
-    this->output_udp_callback = NULL;
+    this->output_ip_data_callback = NULL;
+    this->new_tcp_connect_callback = NULL;
+    this->received_udp_data_callback = NULL;
     
 }
 
@@ -89,8 +89,8 @@ void pip_netif::output(pip_buf *buf, pip_uint8 proto, pip_uint32 src, pip_uint32
     hdr->ip_dst.s_addr = htonl(dest);
     hdr->ip_sum = htons(pip_ip_checksum(hdr, sizeof(struct ip)));
     
-    if (this->output_callback) {
-        this->output_callback(this, ip_head_buf);
+    if (this->output_ip_data_callback) {
+        this->output_ip_data_callback(this, ip_head_buf);
     }
     
     delete ip_head_buf;
@@ -125,8 +125,8 @@ void pip_netif::udp_input(const void * buffer, struct ip *ip) {
     
     pip_uint16 datalen = ntohs(hdr->uh_ulen) - sizeof(struct udphdr);
     void * data = (pip_uint8 *)buffer + sizeof(struct udphdr);
-    if (this->output_udp_callback) {
-        this->output_udp_callback(this, data, datalen, src_ip, src_port, dest_ip, dest_port);
+    if (this->received_udp_data_callback) {
+        this->received_udp_data_callback(this, data, datalen, src_ip, src_port, dest_ip, dest_port);
     }
     
 #if PIP_DEBUG
@@ -143,7 +143,7 @@ void pip_netif::udp_input(const void * buffer, struct ip *ip) {
 }
 
 
-void pip_netif::udp_output(const void *buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port) {
+void pip_netif::udp_send_data(const void *buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port) {
     
     pip_buf * payload_buf = new pip_buf((void *)buffer, buffer_len, 0);
     pip_buf * udp_head_buf = new pip_buf(sizeof(struct udphdr));

@@ -37,6 +37,9 @@ typedef enum : pip_uint8 {
     /* ignore pip_tcp_status_time_wait, */
     pip_tcp_status_close_wait,
     
+    /* connection released */
+    pip_tcp_status_released,
+    
 } pip_tcp_status;
 
 #endif /* pip_type_h */
