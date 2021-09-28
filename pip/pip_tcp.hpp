@@ -13,8 +13,11 @@
 class pip_tcp_packet;
 class pip_tcp;
 
+/// 建立连接完成回调
+typedef void (*pip_tcp_connected_callback) (pip_tcp * tcp);
+
 /// 关闭回调 在这个时候资源已经释放完成
-typedef void (*pip_tcp_close_callback) (pip_tcp * tcp);
+typedef void (*pip_tcp_closed_callback) (pip_tcp * tcp);
 
 /// 数据接收回调
 typedef void (*pip_tcp_received_callback) (pip_tcp * tcp, const void * buffer, pip_uint32 buffer_len);
@@ -34,6 +37,10 @@ public:
     
     /// 获取当前连接数
     static pip_uint32 current_connections();
+    
+    /// 建立连接
+    /// @param bytes 发起端的建立连接时的数据 tcphdr
+    void connected(const void * bytes);
     
     /// 关闭连接
     void close();
@@ -55,7 +62,8 @@ public:
     pip_uint32 get_iden();
     
 public:
-    pip_tcp_close_callback close_callback;
+    pip_tcp_connected_callback connected_callback;
+    pip_tcp_closed_callback closed_callback;
     pip_tcp_received_callback received_callback;
     pip_tcp_written_callback written_callback;
     

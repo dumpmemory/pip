@@ -38,7 +38,8 @@ pip_tcp::pip_tcp() {
     
     this->_last_ack = 0;
     
-    this->close_callback = NULL;
+    this->connected_callback = NULL;
+    this->closed_callback = NULL;
     this->received_callback = NULL;
     this->written_callback = NULL;
     
@@ -69,8 +70,8 @@ void pip_tcp::release() {
         this->_packet_queue = NULL;
     }
     
-    if (this->close_callback)
-        this->close_callback(this);
+    if (this->closed_callback)
+        this->closed_callback(this);
     
     if (this->src_ip_str != NULL) {
         free(this->src_ip_str);
@@ -117,6 +118,17 @@ void pip_tcp::timer_tick() {
 // MARK: - -
 pip_uint32 pip_tcp::current_connections() {
     return (pip_uint32)tcp_connections.size();
+}
+
+void pip_tcp::connected(const void *bytes) {
+    struct tcphdr *hdr = (struct tcphdr *)bytes;
+    
+    // 判断是否有选项 无选项头部为4 * 5 = 20个字节
+    if (hdr->th_off > 5) {
+        this->handle_syn((pip_uint8 *)hdr + sizeof(struct tcphdr), ((hdr->th_off - 5) * 4));
+    } else {
+        this->handle_syn(NULL, 0);
+    }
 }
 
 void pip_tcp::close() {
@@ -250,8 +262,8 @@ void pip_tcp::handle_ack(pip_uint32 ack) {
         if (hdr->th_flags & TH_SYN) {
             this->status = pip_tcp_status_established;
 
-            if (pip_netif::shared()->output_tcp_callback != NULL) {
-                pip_netif::shared()->output_tcp_callback(pip_netif::shared(), this);
+            if (this->connected_callback) {
+                this->connected_callback(this);
             }
         }
         
@@ -506,10 +518,8 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     }
     
     if (hdr->th_flags & TH_SYN) {
-        if (hdr->th_off > 5) {
-            tcp->handle_syn((pip_uint8 *)hdr + sizeof(struct tcphdr), ((hdr->th_off - 5) * 4));
-        } else {
-            tcp->handle_syn(NULL, 0);
+        if (pip_netif::shared()->new_tcp_connect_callback) {
+            pip_netif::shared()->new_tcp_connect_callback(pip_netif::shared(), tcp, bytes, hdr->th_off * 4);
         }
     }
     
