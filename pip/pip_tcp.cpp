@@ -26,7 +26,10 @@ pip_uint32 increase_seq(pip_uint32 seq, pip_uint8 flags, pip_uint32 datalen) {
     return seq;
 }
 
+/// FIN连接状态最近一次检查时间
 static time_t fin_recent_check_time = 0;
+
+/// 当前连接
 static std::map<pip_uint32, pip_tcp *> tcp_connections;
 
 pip_tcp::pip_tcp() {
@@ -57,6 +60,10 @@ pip_tcp::~pip_tcp() {
 }
 
 void pip_tcp::release() {
+    if (this->status == pip_tcp_status_released) {
+        return;
+    }
+    
     tcp_connections.erase(this->_iden);
     this->status = pip_tcp_status_released;
     this->_fin_time = 0;
@@ -70,8 +77,22 @@ void pip_tcp::release() {
         this->_packet_queue = NULL;
     }
     
-    if (this->closed_callback)
+    if (this->closed_callback != NULL) {
         this->closed_callback(this);
+        this->closed_callback = NULL;
+    }
+    
+    if (this->connected_callback != NULL) {
+        this->connected_callback = NULL;
+    }
+    
+    if (this->received_callback != NULL) {
+        this->received_callback = NULL;
+    }
+    
+    if (this->written_callback != NULL) {
+        this->written_callback = NULL;
+    }
     
     if (this->src_ip_str != NULL) {
         free(this->src_ip_str);
@@ -132,6 +153,7 @@ void pip_tcp::connected(const void *bytes) {
 }
 
 void pip_tcp::close() {
+
     this->status = pip_tcp_status_fin_wait_1;
     this->_fin_time = time(NULL);
     
@@ -165,8 +187,8 @@ void pip_tcp::write(const void *bytes, pip_uint32 len) {
         } else {
             packet = new pip_tcp_packet(this, TH_ACK, NULL, payload_buf);
         }
+        this->_packet_queue->push(packet);
         this->send_packet(packet);
-        delete packet;
         
         offset += write_len;
     }
@@ -288,10 +310,11 @@ void pip_tcp::handle_ack(pip_uint32 ack) {
             }
         }
         
-        delete pkt;
         
         if (is_closed) {
             break;
+        } else {
+            delete pkt;
         }
     }
 }

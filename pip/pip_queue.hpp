@@ -61,10 +61,22 @@ public:
     void pop() {
         if (this->_size > 0) {
             pip_queue_node<T> * node = this->_head->next;
-            delete this->_head;
+            
+            if (this->_head == this->_foot) {
+                
+                delete this->_head;
+                this->_head = NULL;
+                this->_foot = NULL;
+                
+            } else {
+                
+                delete this->_head;
+                this->_head = NULL;
+            }
+            
             this->_head = node;
             this->_size -= 1;
-            
+
             if (this->_size <= 0) {
                 this->_head = NULL;
                 this->_foot = NULL;
