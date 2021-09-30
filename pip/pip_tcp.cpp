@@ -16,7 +16,7 @@
 
 /// 判断seq2 > seq1
 int before_seq(pip_uint32 seq1, pip_uint32 seq2) {
-    return (pip_int32)(seq1 - seq2) < 0;
+    return (pip_int32)(seq1 - seq2) <= 0;
 }
 
 pip_uint32 increase_seq(pip_uint32 seq, pip_uint8 flags, pip_uint32 datalen) {
@@ -40,6 +40,7 @@ pip_tcp::pip_tcp() {
     this->receive_mss = PIP_TCP_MSS;
     
     this->_last_ack = 0;
+    this->_is_wait_push_ack = false;
     
     this->connected_callback = NULL;
     this->closed_callback = NULL;
@@ -63,23 +64,21 @@ void pip_tcp::release() {
     if (this->status == pip_tcp_status_released) {
         return;
     }
-    
+
     tcp_connections.erase(this->_iden);
     this->status = pip_tcp_status_released;
     this->_fin_time = 0;
     
     if (this->_packet_queue != NULL) {
-        while (!this->_packet_queue->empty()) {
-            delete this->_packet_queue->front();
-            this->_packet_queue->pop();
-        }
-        delete this->_packet_queue;
+        
+        auto queue = this->_packet_queue;
         this->_packet_queue = NULL;
-    }
-    
-    if (this->closed_callback != NULL) {
-        this->closed_callback(this);
-        this->closed_callback = NULL;
+        
+        while (!queue->empty()) {
+            delete queue->front();
+            queue->pop();
+        }
+        delete queue;
     }
     
     if (this->connected_callback != NULL) {
@@ -102,6 +101,12 @@ void pip_tcp::release() {
     if (this->dest_ip_str != NULL) {
         free(this->dest_ip_str);
         this->dest_ip_str = NULL;
+    }
+    
+    
+    if (this->closed_callback != NULL) {
+        this->closed_callback(this);
+        this->closed_callback = NULL;
     }
     
     this->arg = NULL;
@@ -142,6 +147,15 @@ pip_uint32 pip_tcp::current_connections() {
 }
 
 void pip_tcp::connected(const void *bytes) {
+    if (this->status != pip_tcp_status_closed) {
+        return;
+    }
+    
+    if (bytes == NULL) {
+        this->handle_syn(NULL, 0);
+        return;
+    }
+    
     struct tcphdr *hdr = (struct tcphdr *)bytes;
     
     // 判断是否有选项 无选项头部为4 * 5 = 20个字节
@@ -153,7 +167,17 @@ void pip_tcp::connected(const void *bytes) {
 }
 
 void pip_tcp::close() {
-
+    if (this->status == pip_tcp_status_closed) {
+        this->release();
+        delete this;
+        return;
+    }
+    
+    if (this->status != pip_tcp_status_established) {
+        this->reset();
+        return;
+    }
+    
     this->status = pip_tcp_status_fin_wait_1;
     this->_fin_time = time(NULL);
     
@@ -163,14 +187,25 @@ void pip_tcp::close() {
 }
 
 void pip_tcp::reset() {
-    pip_tcp_packet *packet = new pip_tcp_packet(this, TH_RST | TH_ACK, NULL, NULL);
-    this->send_packet(packet);
+    if (this->status == pip_tcp_status_released) {
+        return;
+    }
+    
+    if (this->status != pip_tcp_status_closed) {
+        pip_tcp_packet *packet = new pip_tcp_packet(this, TH_RST | TH_ACK, NULL, NULL);
+        this->send_packet(packet);
+        delete packet;
+    }
+    
     this->release();
     delete this;
-    delete packet;
 }
 
 void pip_tcp::write(const void *bytes, pip_uint32 len) {
+    if (this->status != pip_tcp_status_established || !this->can_write()) {
+        return;
+    }
+    
     pip_uint32 offset = 0;
     while (offset < len) {
         
@@ -184,6 +219,8 @@ void pip_tcp::write(const void *bytes, pip_uint32 len) {
         pip_tcp_packet * packet;
         if (offset + write_len >= len) {
             packet = new pip_tcp_packet(this, TH_PUSH | TH_ACK, NULL, payload_buf);
+            this->_is_wait_push_ack = true;
+            
         } else {
             packet = new pip_tcp_packet(this, TH_ACK, NULL, payload_buf);
         }
@@ -195,8 +232,12 @@ void pip_tcp::write(const void *bytes, pip_uint32 len) {
 }
 
 void pip_tcp::received(pip_uint16 len) {
+    if (this->status != pip_tcp_status_established) {
+        return;
+    }
+    
     this->receive_wind = PIP_MIN(this->receive_wind + len, PIP_TCP_WIND);
-    if (this->receive_wind - len <= 0&& this->ack == this->_last_ack) {
+    if (this->receive_wind - len <= 0 && this->ack == this->_last_ack) {
         // 无等待发送的包 直接发送ack 更新窗口
         this->send_ack();
     }
@@ -216,6 +257,10 @@ pip_uint32 pip_tcp::get_iden() {
     return this->_iden;
 }
 
+bool pip_tcp::can_write() {
+    return this->_is_wait_push_ack == false;
+}
+
 // MARK: - Send
 void pip_tcp::send_packet(pip_tcp_packet *packet) {
     tcphdr * hdr = packet->get_hdr();
@@ -226,7 +271,7 @@ void pip_tcp::send_packet(pip_tcp_packet *packet) {
     this->seq = increase_seq(this->seq, hdr->th_flags, datalen);
     
 #if PIP_DEBUG
-    printf("send: \n");
+    printf("[send]: \n");
     printf("destination %s port %d\n", inet_ntoa({ htonl(this->src_ip) }), this->src_port);
     printf("flags: ");
     if (hdr->th_flags & TH_FIN) {
@@ -261,6 +306,7 @@ void pip_tcp::send_packet(pip_tcp_packet *packet) {
         printf("CWR ");
     }
     printf("\ndatalen: %d\n", datalen);
+    printf("seq: %d\n", this->seq);
     printf("\n\n");
 #endif
 }
@@ -273,48 +319,75 @@ void pip_tcp::send_ack() {
 
 // MARK: - Handle
 void pip_tcp::handle_ack(pip_uint32 ack) {
+    
+#if PIP_DEBUG
+    printf("[handle_ack]:\n");
+#endif
+    
+    
+    bool has_syn = false;
+    bool has_fin = false;
+    pip_uint32 written_length = 0;
+    
     while (this->_packet_queue->size() > 0) {
         pip_tcp_packet * pkt = this->_packet_queue->front();
         struct tcphdr * hdr = pkt->get_hdr();
         if (hdr && !before_seq(ntohl(hdr->th_seq), ack)) {
+#if PIP_DEBUG
+            printf("break seq: %d ack: %d\n", ntohl(hdr->th_seq), ack);
+#endif
             break;
         }
         this->_packet_queue->pop();
         
         if (hdr->th_flags & TH_SYN) {
             this->status = pip_tcp_status_established;
-
-            if (this->connected_callback) {
-                this->connected_callback(this);
-            }
+            has_syn = true;
         }
         
         if (pkt->payload_len > 0) {
-            if (this->written_callback) {
-                this->written_callback(this, pkt->payload_len);
+            if (hdr->th_flags & TH_PUSH) {
+                this->_is_wait_push_ack = false;
             }
+            
+            written_length += pkt->payload_len;
         }
         
-        pip_uint8 is_closed = 0;
         if (hdr->th_flags & TH_FIN) {
-            if (this->status == pip_tcp_status_fin_wait_1) {
-                /// 主动关闭 改变状态
-                this->status = pip_tcp_status_fin_wait_2;
-                this->_fin_time = time(NULL);
-                
-            } else {
-                /// 被动关闭 清理资源
-                this->release();
-                delete this;
-                is_closed = 1;
-            }
+            has_fin = true;
         }
         
         
-        if (is_closed) {
-            break;
+        delete pkt;
+    }
+    
+#if PIP_DEBUG
+    printf("remain packet num: %d\n", this->_packet_queue->size());
+    printf("\n\n");
+#endif
+    
+    if (has_syn) {
+        if (this->connected_callback) {
+            this->connected_callback(this);
+        }
+    }
+    
+    if (written_length > 0) {
+        if (this->written_callback) {
+            this->written_callback(this, written_length);
+        }
+    }
+    
+    if (has_fin) {
+        if (this->status == pip_tcp_status_fin_wait_1) {
+            /// 主动关闭 改变状态
+            this->status = pip_tcp_status_fin_wait_2;
+            this->_fin_time = time(NULL);
+            
         } else {
-            delete pkt;
+            /// 被动关闭 清理资源
+            this->release();
+            delete this;
         }
     }
 }
@@ -429,6 +502,7 @@ void pip_tcp::handle_receive(void *data, pip_uint16 datalen) {
 
     
 #if PIP_DEBUG
+    printf("[handle_receive]:\n");
     printf("receive data: %d\n", datalen);
 #endif
     this->receive_wind -= datalen;
@@ -486,7 +560,7 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     }
     
 #if PIP_DEBUG
-    printf("received: \n");
+    printf("[input]: \n");
     printf("source %s port %d\n", tcp->src_ip_str, ntohs(hdr->th_sport));
     printf("flags: ");
     if (hdr->th_flags & TH_FIN) {
@@ -522,6 +596,8 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     }
     printf("\ndata length: %d\n", datalen);
     printf("wind: %d\n", ntohs(hdr->th_win));
+    printf("ack: %d\n", ntohl(hdr->th_ack));
+    printf("seq: %d\n", ntohl(hdr->th_seq));
     printf("\n\n");
     
 #endif
@@ -536,6 +612,12 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     tcp->send_wind = ntohs(hdr->th_win);
     
     
+    if (hdr->th_flags & TH_RST) {
+        tcp->release();
+        delete tcp;
+        return;
+    }
+    
     if (hdr->th_flags & TH_ACK) {
         tcp->handle_ack(ntohl(hdr->th_ack));
     }
@@ -548,12 +630,6 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     
     if (hdr->th_flags & TH_FIN) {
         tcp->handle_fin();
-    }
-    
-    if (hdr->th_flags & TH_RST) {
-        tcp->release();
-        delete tcp;
-        return;
     }
     
     if (hdr->th_flags & TH_PUSH) {

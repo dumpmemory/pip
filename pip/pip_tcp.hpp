@@ -61,6 +61,9 @@ public:
     /// 获取连接标识
     pip_uint32 get_iden();
     
+    /// 写之前调用该方法判断当前是否能写
+    bool can_write();
+    
 public:
     pip_tcp_connected_callback connected_callback;
     pip_tcp_closed_callback closed_callback;
@@ -122,9 +125,17 @@ private:
     
 private:
     
+    /// 需要等待确认的包队列
     pip_queue<pip_tcp_packet *> * _packet_queue;
+    
+    /// 当前连接标识
     pip_uint32 _iden;
+    
+    /// 最后一次ack
     pip_uint32 _last_ack;
+    
+    /// 当前是否等待确认PUSH包
+    bool _is_wait_push_ack;
 
     /// 主动关闭时间 定期检查 防止客户端不响应ACK 导致资源占用
     time_t _fin_time;
