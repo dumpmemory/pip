@@ -30,6 +30,8 @@ typedef int32_t pip_int32;
 
 typedef enum : pip_uint8 {
     pip_tcp_status_closed,
+    /* received SYN wait response */
+    pip_tcp_status_wait_establishing,
     pip_tcp_status_establishing,
     pip_tcp_status_established,
     pip_tcp_status_fin_wait_1,

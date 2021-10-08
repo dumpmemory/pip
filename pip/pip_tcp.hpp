@@ -17,7 +17,7 @@ class pip_tcp;
 typedef void (*pip_tcp_connected_callback) (pip_tcp * tcp);
 
 /// 关闭回调 在这个时候资源已经释放完成
-typedef void (*pip_tcp_closed_callback) (pip_tcp * tcp);
+typedef void (*pip_tcp_closed_callback) (pip_tcp * tcp, void *arg);
 
 /// 数据接收回调
 typedef void (*pip_tcp_received_callback) (pip_tcp * tcp, const void * buffer, pip_uint32 buffer_len);

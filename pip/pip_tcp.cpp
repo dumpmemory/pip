@@ -52,7 +52,7 @@ pip_tcp::pip_tcp() {
     
     this->arg = NULL;
     
-    this->_packet_queue = new pip_queue<pip_tcp_packet *>;
+    this->_packet_queue = new pip_queue<pip_tcp_packet *>();
     this->_fin_time = 0;
 }
 
@@ -103,13 +103,15 @@ void pip_tcp::release() {
         this->dest_ip_str = NULL;
     }
     
+    void * arg = this->arg;
+    this->arg = NULL;
     
     if (this->closed_callback != NULL) {
-        this->closed_callback(this);
+        this->closed_callback(this, arg);
         this->closed_callback = NULL;
     }
     
-    this->arg = NULL;
+    
 }
 
 void pip_tcp::timer_tick() {
@@ -147,7 +149,7 @@ pip_uint32 pip_tcp::current_connections() {
 }
 
 void pip_tcp::connected(const void *bytes) {
-    if (this->status != pip_tcp_status_closed) {
+    if (this->status != pip_tcp_status_wait_establishing) {
         return;
     }
     
@@ -167,36 +169,55 @@ void pip_tcp::connected(const void *bytes) {
 }
 
 void pip_tcp::close() {
-    if (this->status == pip_tcp_status_closed) {
-        this->release();
-        delete this;
-        return;
+    
+    switch (this->status) {
+        case pip_tcp_status_closed: {
+            this->release();
+            delete this;
+            break;
+        }
+            
+        case pip_tcp_status_wait_establishing:
+        case pip_tcp_status_establishing: {
+            this->reset();
+            break;
+        }
+            
+        case pip_tcp_status_established: {
+            this->status = pip_tcp_status_fin_wait_1;
+            this->_fin_time = time(NULL);
+
+            pip_tcp_packet *packet = new pip_tcp_packet(this, TH_FIN | TH_ACK, NULL, NULL);
+            this->_packet_queue->push(packet);
+            this->send_packet(packet);
+            break;
+        }
+            
+        default:
+            break;
     }
-    
-    if (this->status != pip_tcp_status_established) {
-        this->reset();
-        return;
-    }
-    
-    this->status = pip_tcp_status_fin_wait_1;
-    this->_fin_time = time(NULL);
-    
-    pip_tcp_packet *packet = new pip_tcp_packet(this, TH_FIN | TH_ACK, NULL, NULL);
-    this->_packet_queue->push(packet);
-    this->send_packet(packet);
 }
 
 void pip_tcp::reset() {
+    
+    switch (this->status) {
+        case pip_tcp_status_wait_establishing:
+        case pip_tcp_status_establishing:
+        case pip_tcp_status_established: {
+            pip_tcp_packet *packet = new pip_tcp_packet(this, TH_RST | TH_ACK, NULL, NULL);
+            this->send_packet(packet);
+            delete packet;
+        }
+            break;
+            
+        default:
+            break;
+    }
+    
     if (this->status == pip_tcp_status_released) {
         return;
     }
-    
-    if (this->status != pip_tcp_status_closed) {
-        pip_tcp_packet *packet = new pip_tcp_packet(this, TH_RST | TH_ACK, NULL, NULL);
-        this->send_packet(packet);
-        delete packet;
-    }
-    
+
     this->release();
     delete this;
 }
@@ -384,7 +405,7 @@ void pip_tcp::handle_ack(pip_uint32 ack) {
             this->status = pip_tcp_status_fin_wait_2;
             this->_fin_time = time(NULL);
             
-        } else {
+        } else if (this->status == pip_tcp_status_close_wait) {
             /// 被动关闭 清理资源
             this->release();
             delete this;
@@ -623,6 +644,7 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     }
     
     if (hdr->th_flags & TH_SYN) {
+        tcp->status = pip_tcp_status_wait_establishing;
         if (pip_netif::shared()->new_tcp_connect_callback) {
             pip_netif::shared()->new_tcp_connect_callback(pip_netif::shared(), tcp, bytes, hdr->th_off * 4);
         }
