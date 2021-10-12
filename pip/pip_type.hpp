@@ -15,11 +15,12 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
-
+#include <sys/time.h>
 
 typedef u_int8_t pip_uint8;
 typedef u_int16_t pip_uint16;
 typedef u_int32_t pip_uint32;
+typedef u_int64_t pip_uint64;
 
 typedef int32_t pip_int32;
 
@@ -43,5 +44,14 @@ typedef enum : pip_uint8 {
     pip_tcp_status_released,
     
 } pip_tcp_status;
+
+
+
+static inline pip_uint64 get_current_time() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
 
 #endif /* pip_type_h */

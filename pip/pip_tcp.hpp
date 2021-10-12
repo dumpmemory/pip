@@ -10,6 +10,7 @@
 #include "pip_type.hpp"
 #include "pip_queue.hpp"
 #include "pip_buf.hpp"
+
 class pip_tcp_packet;
 class pip_tcp;
 
@@ -29,7 +30,7 @@ class pip_tcp {
     pip_tcp();
     ~pip_tcp();
     
-    void release();
+    void release(const char * debug_info);
 public:
     
     static void input(const void * bytes, struct ip *ip);
@@ -48,8 +49,9 @@ public:
     /// 重置连接
     void reset();
     
-    /// 发送数据
-    void write(const void *bytes, pip_uint32 len);
+    
+    /// 发送数据 返回发送的长度
+    pip_uint32 write(const void *bytes, pip_uint32 len);
     
     /// 接受数据之后调用更新窗口
     /// @param len 接受的数据大小
@@ -105,6 +107,9 @@ private:
     /// 发送数据包
     void send_packet(pip_tcp_packet *packet);
     
+    /// 重新发送数据包
+    void resend_packet(pip_tcp_packet *packet);
+    
     /// 发送确认ACK
     void send_ack();
     
@@ -138,7 +143,7 @@ private:
     bool _is_wait_push_ack;
 
     /// 主动关闭时间 定期检查 防止客户端不响应ACK 导致资源占用
-    time_t _fin_time;
+    pip_uint64 _fin_time;
 };
 
 
@@ -149,14 +154,46 @@ class pip_tcp_packet {
 public:
     ~pip_tcp_packet();
     
-    pip_tcp_packet(pip_tcp *tcp, pip_uint8 flags, pip_buf * option_buf, pip_buf * payload_buf);
+    pip_tcp_packet(pip_tcp *tcp, pip_uint8 flags, pip_buf * option_buf, pip_buf * payload_buf, const char * debug_iden);
   
     
-    pip_buf * head_buf;
+    /// 获取 tcphdr
     struct tcphdr * get_hdr();
-    int payload_len;
+    
+    /// 获取 头部 buf
+    pip_buf * get_head_buf();
+    
+    /// 获取数据长度
+    pip_uint32 get_payload_len();
+    
+    /// 获取发送时间
+    pip_uint64 get_send_time();
+    
+    /// 获取发送次数
+    pip_uint8 get_send_count();
+    
+    /// 发送一次调用一次
+    void sended();
+    
 private:
-    pip_uint8 * buffer;
+    /// 头部信息
+    pip_buf * _head_buf;
+    
+    /// 数据信息
+    pip_uint8 * _buffer;
+    
+    /// 数据长度
+    pip_uint32 _payload_len;
+    
+    /// 发送时间
+    pip_uint64 _send_time;
+    
+    /// 发送次数
+    pip_uint8 _send_count;
+    
+    /// 调试使用
+    const char * _debug_iden;
+    
 };
 
 #endif /* pip_tcp_hpp */

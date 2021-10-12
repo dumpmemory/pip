@@ -12,7 +12,7 @@ pip_buf::pip_buf(void * payload, int payload_len, int is_copy) {
     
     
     this->payload_len = payload_len;
-    if (is_copy) {
+    if (is_copy && payload_len > 0) {
         void * b = malloc(sizeof(char) * payload_len);
         memcpy(b, payload, payload_len);
         this->payload = b;
@@ -57,11 +57,18 @@ pip_buf::~pip_buf() {
 
 void pip_buf::set_next(pip_buf *buf) {
     if (buf == NULL) {
+        if (this->next) {
+            this->total_len -= this->next->total_len;
+            this->next->pre = NULL;
+            this->next = NULL;
+        }
+        
         return;
     }
     
     if (this->next != NULL) {
         this->total_len -= this->next->total_len;
+        this->next->pre = NULL;
     }
     
     this->total_len += buf->total_len;

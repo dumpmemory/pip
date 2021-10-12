@@ -1,4 +1,10 @@
 # pip
-A simple TCP/IP stack, just like lwIP, but pip focus only parse IP Packet and output IP Packet, basically realize no memory copy
 
-一个简单的TCP/IP协议栈实现，类似lwIP但是只专注于解析 IP Packet 和输出 IP Packet，基本实现了无内存复制，TCP只实现了MSS与WIND并且这两个是固定的值
+一个简单的内存使用极少的TCP/IP协议栈，专注于解析IP包并输出TCP、UDP连接。
+
+TCP实现比较简单，一个固定的滑动窗口、简单的超时重传、超简单的接受数据包顺序检测。
+
+
+A simple use memory very little TCP/IP Protocol Stack implementation. Focus on parse IP Packet and output TCP and UDP connection.
+
+The TCP implementation is simple, A fixed window size and a simple timeout resend and a very simple receive order check

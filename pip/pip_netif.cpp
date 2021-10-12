@@ -93,6 +93,7 @@ void pip_netif::output(pip_buf *buf, pip_uint8 proto, pip_uint32 src, pip_uint32
         this->output_ip_data_callback(this, ip_head_buf);
     }
     
+    ip_head_buf->set_next(NULL);
     delete ip_head_buf;
 }
 
@@ -164,4 +165,6 @@ void pip_netif::udp_send_data(const void *buffer, pip_uint16 buffer_len, const c
     hdr->uh_sum = htons(hdr->uh_sum);
 
     this->output(udp_head_buf, IPPROTO_UDP, ntohl(src_addr), ntohl(dest_addr));
+    
+    delete udp_head_buf;
 }
