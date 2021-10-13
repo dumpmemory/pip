@@ -354,7 +354,7 @@ void pip_tcp::send_packet(pip_tcp_packet *packet) {
     
 #if PIP_DEBUG
     printf("[send]: \n");
-    printf("iden: %d\n", this->_iden);
+    printf("iden: %u\n", this->_iden);
     printf("destination %s port %d\n", inet_ntoa({ htonl(this->src_ip) }), this->src_port);
     printf("flags: ");
     if (hdr->th_flags & TH_FIN) {
@@ -736,6 +736,29 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
 #endif
     
     if (tcp == NULL) {
+        
+        if (hdr->th_flags & TH_RST) {
+        } else {
+            // 不存在的连接 直接返回RST
+            tcp = new pip_tcp;
+            tcp->_iden = iden;
+            
+            tcp->src_ip = ntohl(ip->ip_src.s_addr);
+            tcp->dest_ip = ntohl(ip->ip_dst.s_addr);
+            
+            tcp->src_port = ntohs(hdr->th_sport);
+            tcp->dest_port = dport;
+            
+            tcp->seq = ntohl(hdr->th_ack);
+            tcp->ack = increase_seq(ntohl(hdr->th_seq), hdr->th_flags, datalen);
+            
+            pip_tcp_packet *packet = new pip_tcp_packet(tcp, TH_RST | TH_ACK, NULL, NULL, "pip_tcp::input pip_tcp::reset");
+            tcp->send_packet(packet);
+            delete packet;
+            
+            tcp->release("pip_tcp::input no exist");
+            delete tcp;
+        }
 #if PIP_DEBUG
         printf("未获取到TCP连接\n");
 #endif
@@ -745,13 +768,6 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     if (hdr->th_flags == TH_ACK && ntohl(hdr->th_seq) == tcp->ack - 1) {
         // keep-alive 包 直接回复
         tcp->send_ack();
-        return;
-    }
-    
-    if (hdr->th_flags & TH_RST) {
-        // RST 标志直接释放
-        tcp->release("input");
-        delete tcp;
         return;
     }
     
@@ -767,14 +783,6 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     tcp->send_wind = ntohs(hdr->th_win);
     
     
-    
-    if (hdr->th_flags & TH_SYN) {
-        tcp->status = pip_tcp_status_wait_establishing;
-        if (pip_netif::shared()->new_tcp_connect_callback) {
-            pip_netif::shared()->new_tcp_connect_callback(pip_netif::shared(), tcp, bytes, hdr->th_off * 4);
-        }
-    }
-    
     if (hdr->th_flags & TH_PUSH) {
         tcp->handle_push((pip_uint8 *)bytes + hdr->th_off * 4, datalen);
     } else if (datalen > 0) {
@@ -783,6 +791,20 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     
     if (hdr->th_flags & TH_ACK) {
         tcp->handle_ack(ntohl(hdr->th_ack));
+    }
+    
+    if (hdr->th_flags & TH_RST) {
+        // RST 标志直接释放
+        tcp->release("pip_tcp::input");
+        delete tcp;
+        return;
+    }
+    
+    if (hdr->th_flags & TH_SYN) {
+        tcp->status = pip_tcp_status_wait_establishing;
+        if (pip_netif::shared()->new_tcp_connect_callback) {
+            pip_netif::shared()->new_tcp_connect_callback(pip_netif::shared(), tcp, bytes, hdr->th_off * 4);
+        }
     }
     
     if (hdr->th_flags & TH_FIN) {
