@@ -399,8 +399,11 @@ void
 pip_tcp::resend_packet(pip_tcp_packet *packet) {
     packet->sended();
     
+#if PIP_DEBUG
     tcphdr * hdr = packet->get_hdr();
     pip_uint16 datalen = packet->get_payload_len();
+#endif
+    
     pip_netif::shared()->output(packet->get_head_buf(), IPPROTO_TCP, this->dest_ip, this->src_ip);
     
 #if PIP_DEBUG
