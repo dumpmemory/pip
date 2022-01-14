@@ -35,6 +35,15 @@ pip_uint32 increase_seq(pip_uint32 seq, pip_uint8 flags, pip_uint32 datalen) {
 /// 当前连接
 static std::map<pip_uint32, pip_tcp *> tcp_connections;
 
+/// 根据标识提取连接
+/// @param iden 连接标识
+pip_tcp * fetch_tcp_connection(pip_uint32 iden) {
+    if (tcp_connections.find(iden) != tcp_connections.end()) {
+        return tcp_connections[iden];
+    }
+    return NULL;
+}
+
 pip_tcp::pip_tcp() {
     this->status = pip_tcp_status_closed;
     this->ack = 0;
@@ -587,12 +596,9 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     }
     
     pip_uint32 iden = ip->ip_src.s_addr ^ ip->ip_dst.s_addr ^ dport ^ ntohs(hdr->th_sport);
-    pip_tcp * tcp = NULL;
+    pip_tcp * tcp = fetch_tcp_connection(iden);
     
-
-    if (tcp_connections.find(iden) != tcp_connections.end()) {
-        tcp = tcp_connections[iden];
-    } else if (hdr->th_flags & TH_SYN && tcp_connections.size() < PIP_TCP_MAX_CONNS) {
+    if (tcp == NULL && hdr->th_flags & TH_SYN && tcp_connections.size() < PIP_TCP_MAX_CONNS) {
         tcp = new pip_tcp;
         tcp->_iden = iden;
         
@@ -672,6 +678,11 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     
     if (hdr->th_flags & TH_ACK) {
         tcp->handle_ack(ntohl(hdr->th_ack));
+    }
+    
+    if (fetch_tcp_connection(iden) == NULL) {
+        /// 防止 tcp 在handle_ack里释放了继续执行崩溃
+        return;
     }
     
     if (hdr->th_flags & TH_RST) {
