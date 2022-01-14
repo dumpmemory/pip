@@ -87,17 +87,17 @@ public:
     pip_uint32 seq;
     pip_uint32 ack;
     
-    /// 接收mss
-    pip_uint16 receive_mss;
+    /// mss
+    pip_uint16 mss;
     
-    /// 发送mss 对方的mss
-    pip_uint16 send_mss;
+    /// 对方的mss
+    pip_uint16 opp_mss;
     
     /// 接收窗口大小
-    pip_uint16 receive_wind;
+    pip_uint16 wind;
     
-    /// 发送窗口大小 对方的窗口
-    pip_uint16 send_wind;
+    /// 对方的窗口大小
+    pip_uint16 opp_wind;
     
     /// 外部使用-用于区分
     void * arg;

@@ -39,7 +39,7 @@ void _pip_netif_received_udp_data_callback(pip_netif * netif, void * buffer, pip
     free(str);
     
     
-    netif->udp_send_data(buffer, buffer_len, src_ip, src_port, dest_ip, dest_port);
+    pip_udp::output(buffer, buffer_len, src_ip, src_port, dest_ip, dest_port);
 }
 
 

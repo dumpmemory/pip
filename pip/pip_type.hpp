@@ -12,10 +12,14 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
+
 #include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+
 #include <sys/time.h>
+#include "pip_opt.hpp"
 
 typedef u_int8_t pip_uint8;
 typedef u_int16_t pip_uint16;

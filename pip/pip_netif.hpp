@@ -22,6 +22,9 @@ typedef void (*pip_netif_new_tcp_connect_callback) (pip_netif * netif, pip_tcp *
 // 接受到UDP数据
 typedef void (*pip_netif_received_udp_data_callback) (pip_netif * netif, void * buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port);
 
+// 接受到ICMP数据
+typedef void (*pip_netif_received_icmp_data_callback) (pip_netif * netif, void * buffer, pip_uint16 buffer_len, const char * src_ip, const char * dest_ip);
+
 
 class pip_netif {
     pip_netif();
@@ -51,12 +54,7 @@ public:
     pip_netif_output_ip_data_callback output_ip_data_callback;
     pip_netif_new_tcp_connect_callback new_tcp_connect_callback;
     pip_netif_received_udp_data_callback received_udp_data_callback;
-    
-public:
-    void udp_send_data(const void *buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port);
-    
-private:
-    void udp_input(const void * buffer, struct ip *ip);
+    pip_netif_received_icmp_data_callback received_icmp_data_callback;
     
 private:
     pip_uint16 _identifer = 0;

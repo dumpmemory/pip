@@ -8,15 +8,16 @@
 #include "pip_opt.hpp"
 #include "pip_checksum.hpp"
 #include "pip_netif.hpp"
+#include "pip_debug.hpp"
 #include <map>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <mutex>
 
 
-/// 判断seq2 > seq1
-int before_seq(pip_uint32 seq1, pip_uint32 seq2) {
-    return (pip_int32)(seq1 - seq2) < 0;
+/// 判断seq <= ack
+int is_before_seq(pip_uint32 seq, pip_uint32 ack) {
+    return (pip_int32)(seq - ack) <= 0;
 }
 
 pip_uint32 increase_seq(pip_uint32 seq, pip_uint8 flags, pip_uint32 datalen) {
@@ -39,11 +40,11 @@ pip_tcp::pip_tcp() {
     this->ack = 0;
     this->seq = pip_netif::shared()->get_isn();
     
-    this->receive_wind = PIP_TCP_WIND;
-    this->receive_mss = PIP_TCP_MSS;
+    this->wind = PIP_TCP_WIND;
+    this->mss = PIP_TCP_MSS;
     
-    this->send_mss = 0;
-    this->send_wind = 0;
+    this->opp_wind = 0;
+    this->opp_mss = 0;
     
     this->_last_ack = 0;
     this->_is_wait_push_ack = false;
@@ -72,8 +73,8 @@ void pip_tcp::release(const char * debug_info) {
     }
     
     
-#if DEBUG
-    printf("[release]:\n");
+#if PIP_DEBUG
+    printf("[tcp_release]:\n");
     printf("release iden %d\n", this->_iden);
     if (debug_info) {
         printf("debug_info: %s\n", debug_info);
@@ -269,9 +270,9 @@ pip_uint32 pip_tcp::write(const void *bytes, pip_uint32 len) {
     }
     
     pip_uint32 offset = 0;
-    while (offset < len && this->send_wind > 0) {
+    while (offset < len && this->opp_wind > 0) {
         
-        pip_uint16 write_len = this->send_mss;
+        pip_uint16 write_len = this->opp_mss;
         
         /// 获取小于等于mss的数据长度
         if (offset + write_len > len) {
@@ -279,8 +280,8 @@ pip_uint32 pip_tcp::write(const void *bytes, pip_uint32 len) {
         }
         
         /// 获取小于等于对方的窗口长度
-        if (write_len > this->send_wind) {
-            write_len = this->send_wind;
+        if (write_len > this->opp_wind) {
+            write_len = this->opp_wind;
         }
         
         if (write_len <= 0) {
@@ -288,7 +289,7 @@ pip_uint32 pip_tcp::write(const void *bytes, pip_uint32 len) {
         }
         
         /// 如果当前发送数据大于等于总数据长度 或者 对方窗口为0 则发送PUSH标签
-        pip_uint8 is_push = offset + write_len >= len || write_len >= this->send_wind;
+        pip_uint8 is_push = offset + write_len >= len || write_len >= this->opp_wind;
         
         pip_buf * payload_buf = new pip_buf((pip_uint8 *)bytes + offset, write_len, 1);
         pip_tcp_packet * packet;
@@ -304,7 +305,7 @@ pip_uint32 pip_tcp::write(const void *bytes, pip_uint32 len) {
         this->send_packet(packet);
         
         offset += write_len;
-        this->send_wind -= write_len;
+        this->opp_wind -= write_len;
     }
     
     return offset;
@@ -315,9 +316,9 @@ void pip_tcp::received(pip_uint16 len) {
         return;
     }
     
-    this->receive_wind = PIP_MIN(this->receive_wind + len, PIP_TCP_WIND);
-    if (this->receive_wind - len <= 0 && this->ack == this->_last_ack) {
-        // 无等待发送的包 直接发送ack 更新窗口
+    this->wind = PIP_MIN(this->wind + len, PIP_TCP_WIND);
+    if (this->wind - len <= 0 && this->ack == this->_last_ack) {
+        /// 当前窗口<=0，并且无等待发送的包 直接发送ack 更新窗口
         this->send_ack();
     }
 }
@@ -325,7 +326,7 @@ void pip_tcp::received(pip_uint16 len) {
 void pip_tcp::debug_status() {
     printf("source %s port %d\n", this->src_ip_str, this->src_port);
     printf("destination %s port %d\n", this->dest_ip_str, this->dest_port);
-    printf("wind %hu \n", this->receive_wind);
+    printf("wind %hu \n", this->wind);
     printf("wait ack pkts %d \n", this->_packet_queue->size());
     
     printf("current tcp connections %lu \n", tcp_connections.size());
@@ -353,99 +354,17 @@ void pip_tcp::send_packet(pip_tcp_packet *packet) {
     this->seq = increase_seq(this->seq, hdr->th_flags, datalen);
     
 #if PIP_DEBUG
-    printf("[send]: \n");
-    printf("iden: %u\n", this->_iden);
-    printf("destination %s port %d\n", inet_ntoa({ htonl(this->src_ip) }), this->src_port);
-    printf("flags: ");
-    if (hdr->th_flags & TH_FIN) {
-        printf("FIN ");
-    }
-    
-    if (hdr->th_flags & TH_SYN) {
-        printf("SYN ");
-    }
-    
-    if (hdr->th_flags & TH_RST) {
-        printf("RST ");
-    }
-    
-    if (hdr->th_flags & TH_PUSH) {
-        printf("PUSH ");
-    }
-    
-    if (hdr->th_flags & TH_ACK) {
-        printf("ACK ");
-    }
-    
-    if (hdr->th_flags & TH_URG) {
-        printf("URG ");
-    }
-    
-    if (hdr->th_flags & TH_ECE) {
-        printf("ECE ");
-    }
-    
-    if (hdr->th_flags & TH_CWR) {
-        printf("CWR ");
-    }
-    printf("\ndatalen: %d\n", datalen);
-    printf("ack: %u\n", ntohl(hdr->th_ack));
-    printf("seq: %u\n", ntohl(hdr->th_seq));
-    printf("\n\n");
+    pip_debug_output_tcp(this, packet, "tcp_send");
 #endif
 }
     
 void
 pip_tcp::resend_packet(pip_tcp_packet *packet) {
     packet->sended();
-    
-#if PIP_DEBUG
-    tcphdr * hdr = packet->get_hdr();
-    pip_uint16 datalen = packet->get_payload_len();
-#endif
-    
     pip_netif::shared()->output(packet->get_head_buf(), IPPROTO_TCP, this->dest_ip, this->src_ip);
     
 #if PIP_DEBUG
-    printf("[resend]: \n");
-    printf("iden: %d\n", this->_iden);
-    printf("destination %s port %d\n", inet_ntoa({ htonl(this->src_ip) }), this->src_port);
-    printf("flags: ");
-    if (hdr->th_flags & TH_FIN) {
-        printf("FIN ");
-    }
-    
-    if (hdr->th_flags & TH_SYN) {
-        printf("SYN ");
-    }
-    
-    if (hdr->th_flags & TH_RST) {
-        printf("RST ");
-    }
-    
-    if (hdr->th_flags & TH_PUSH) {
-        printf("PUSH ");
-    }
-    
-    if (hdr->th_flags & TH_ACK) {
-        printf("ACK ");
-    }
-    
-    if (hdr->th_flags & TH_URG) {
-        printf("URG ");
-    }
-    
-    if (hdr->th_flags & TH_ECE) {
-        printf("ECE ");
-    }
-    
-    if (hdr->th_flags & TH_CWR) {
-        printf("CWR ");
-    }
-    printf("\ndatalen: %d\n", datalen);
-    printf("ack: %u\n", ntohl(hdr->th_ack));
-    printf("seq: %u\n", ntohl(hdr->th_seq));
-    printf("\n\n");
+    pip_debug_output_tcp(this, packet, "tcp_resend");
 #endif
 }
 
@@ -459,7 +378,7 @@ void pip_tcp::send_ack() {
 void pip_tcp::handle_ack(pip_uint32 ack) {
     
 #if PIP_DEBUG
-    printf("[handle_ack]:\n");
+    printf("[tcp_handle_ack]:\n");
 #endif
     
     
@@ -470,7 +389,9 @@ void pip_tcp::handle_ack(pip_uint32 ack) {
     while (this->_packet_queue->size() > 0) {
         pip_tcp_packet * pkt = this->_packet_queue->front();
         struct tcphdr * hdr = pkt->get_hdr();
-        if (!hdr || !before_seq(ntohl(hdr->th_seq), ack)) {
+        
+        
+        if (hdr == NULL || is_before_seq(ntohl(hdr->th_seq), ack) == false) {
 #if PIP_DEBUG
             if (hdr)
                 printf("break seq: %d ack: %d\n", ntohl(hdr->th_seq), ack);
@@ -534,7 +455,7 @@ void pip_tcp::handle_syn(void * options, pip_uint16 optionlen) {
     this->status = pip_tcp_status_establishing;
     
 #if PIP_DEBUG
-    printf("[handle_syn]:\n");
+    printf("[tcp_handle_syn]:\n");
     printf("parse option:\n");
     printf("option len: %d\n", optionlen);
     printf("\n");
@@ -564,7 +485,7 @@ void pip_tcp::handle_syn(void * options, pip_uint16 optionlen) {
                     pip_uint8 len = bytes[offset + 1];
                     pip_uint16 mss = 0;
                     memcpy(&mss, bytes + offset + 2, len - offset - 2);
-                    this->send_mss = ntohs(mss);
+                    this->opp_mss = ntohs(mss);
 #if PIP_DEBUG
                     printf("mss: %d", ntohs(mss));
 #endif
@@ -592,7 +513,7 @@ void pip_tcp::handle_syn(void * options, pip_uint16 optionlen) {
         // mss
         pip_uint8 kind = 2;
         pip_uint8 len = 4;
-        pip_uint16 value = htons(this->receive_mss);
+        pip_uint16 value = htons(this->mss);
         
         memcpy(optionBuffer, &kind, 1);
         memcpy(optionBuffer + 1, &len, 1);
@@ -641,11 +562,11 @@ void pip_tcp::handle_receive(void *data, pip_uint16 datalen) {
 
     
 #if PIP_DEBUG
-    printf("[handle_receive]:\n");
+    printf("[tcp_handle_receive]:\n");
     printf("receive data: %d\n", datalen);
     printf("\n\n");
 #endif
-    this->receive_wind -= datalen;
+    this->wind -= datalen;
     if (this->received_callback) {
         this->received_callback(this, data, datalen);
     }
@@ -692,50 +613,7 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     
     
 #if PIP_DEBUG
-    printf("[input]: \n");
-    printf("iden: %u\n", iden);
-    if (tcp != NULL) {
-        printf("source %s port %d\n", tcp->src_ip_str, ntohs(hdr->th_sport));
-        printf("dest %s port %d\n", tcp->dest_ip_str, ntohs(hdr->th_dport));
-    }
-    printf("flags: ");
-    if (hdr->th_flags & TH_FIN) {
-        printf("FIN ");
-    }
-    
-    if (hdr->th_flags & TH_SYN) {
-        printf("SYN ");
-    }
-    
-    if (hdr->th_flags & TH_RST) {
-        printf("RST ");
-    }
-    
-    if (hdr->th_flags & TH_PUSH) {
-        printf("PUSH ");
-    }
-    
-    if (hdr->th_flags & TH_ACK) {
-        printf("ACK ");
-    }
-    
-    if (hdr->th_flags & TH_URG) {
-        printf("URG ");
-    }
-    
-    if (hdr->th_flags & TH_ECE) {
-        printf("ECE ");
-    }
-    
-    if (hdr->th_flags & TH_CWR) {
-        printf("CWR ");
-    }
-    printf("\ndata length: %d\n", datalen);
-    printf("wind: %u\n", ntohs(hdr->th_win));
-    printf("ack: %u\n", ntohl(hdr->th_ack));
-    printf("seq: %u\n", ntohl(hdr->th_seq));
-    printf("\n\n");
-    
+    pip_debug_output_tcp(tcp, hdr, datalen, "tcp_input");
 #endif
     
     if (tcp == NULL) {
@@ -783,7 +661,7 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     }
     
     tcp->ack = increase_seq(ntohl(hdr->th_seq), hdr->th_flags, datalen);
-    tcp->send_wind = ntohs(hdr->th_win);
+    tcp->opp_wind = ntohs(hdr->th_win);
     
     
     if (hdr->th_flags & TH_PUSH) {
@@ -907,7 +785,7 @@ pip_tcp_packet(pip_tcp *tcp, pip_uint8 flags, pip_buf * option_buf, pip_buf * pa
     if (true) {
         // 窗口大小
         int len = sizeof(pip_uint16);
-        pip_uint16 wind = htons(tcp->receive_wind);
+        pip_uint16 wind = htons(tcp->wind);
         memcpy(buffer + offset, &wind, len);
         
         offset += len;
