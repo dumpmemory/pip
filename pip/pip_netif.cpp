@@ -12,6 +12,7 @@
 #include "pip_checksum.hpp"
 #include <iostream>
 #include <mutex>
+#include "pip_ip_header.hpp"
 #include "pip_debug.hpp"
 
 using namespace std;
@@ -43,44 +44,39 @@ pip_netif * pip_netif::shared() {
 }
 
 void pip_netif::input(const void *buffer) {
-    struct ip *hdr = (struct ip*)buffer;
-    
 #if PIP_DEBUG
-    pip_debug_output_ip(hdr, "ip_input");
+    pip_debug_output_ip((struct ip*)buffer, "ip_input");
 #endif
     
-    /// - 检测是否有options 不支持options
-    if (hdr->ip_hl > 5) {
+    pip_ip_header * ip_header = new pip_ip_header(buffer);
+    
+    
+    if (ip_header->version == 6) {
+        /// 暂不支持IPv6
+        delete ip_header;
         return;
     }
     
-    /// - 检查是否是IP4
-    if (hdr->ip_v != 4) {
-        return;
+    if (ip_header->version == 4) {
+        /// - 检测是否有options 不支持options
+        if (ip_header->has_options) {
+            delete ip_header;
+            return;
+        }
     }
     
-    switch (hdr->ip_p) {
-        case IPPROTO_ICMP:
-            /// echo
-//            if (this->output_ip_data_callback) {
-//                pip_buf * ip_head_buf = new pip_buf(((pip_uint8 *)buffer) + 20, ntohs(hdr->ip_len) - 20, 0);
-//                this->output(ip_head_buf, IPPROTO_ICMP, ntohl(hdr->ip_dst.s_addr), ntohl(hdr->ip_src.s_addr));
-//                delete ip_head_buf;
-//            }
-            pip_icmp::input(((pip_uint8 *)buffer)+20, hdr);
+    pip_uint8 * data = ((pip_uint8 *)buffer) + ip_header->headerlen;
+    switch (ip_header->protocol) {
+        case IPPROTO_UDP:
+            pip_udp::input(data, ip_header);
             break;
             
-        case IPPROTO_UDP: {
-            pip_udp::input(((pip_uint8 *)buffer)+20, hdr);
+        case IPPROTO_TCP:
+            pip_tcp::input(data, ip_header);
             break;
-        }
-            
-        case IPPROTO_TCP: {
-            pip_tcp::input(((pip_uint8 *)buffer)+20, hdr);
-            break;
-        }
             
         default:
+            delete ip_header;
             break;
     }
 }

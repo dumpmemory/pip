@@ -63,8 +63,7 @@ pip_tcp::pip_tcp() {
     this->received_callback = NULL;
     this->written_callback = NULL;
     
-    this->dest_ip_str = NULL;
-    this->src_ip_str = NULL;
+    this->ip_header = NULL;
     
     this->arg = NULL;
     
@@ -118,14 +117,9 @@ void pip_tcp::release(const char * debug_info) {
         this->written_callback = NULL;
     }
     
-    if (this->src_ip_str != NULL) {
-        free(this->src_ip_str);
-        this->src_ip_str = NULL;
-    }
-    
-    if (this->dest_ip_str != NULL) {
-        free(this->dest_ip_str);
-        this->dest_ip_str = NULL;
+    if (this->ip_header != NULL) {
+        free(this->ip_header);
+        this->ip_header = NULL;
     }
     
     void * arg = this->arg;
@@ -333,8 +327,8 @@ void pip_tcp::received(pip_uint16 len) {
 }
 
 void pip_tcp::debug_status() {
-    printf("source %s port %d\n", this->src_ip_str, this->src_port);
-    printf("destination %s port %d\n", this->dest_ip_str, this->dest_port);
+    printf("source %s port %d\n", this->ip_header->src_str, this->src_port);
+    printf("destination %s port %d\n", this->ip_header->dest_str, this->dest_port);
     printf("wind %hu \n", this->wind);
     printf("wait ack pkts %d \n", this->_packet_queue->size());
     
@@ -356,7 +350,7 @@ void pip_tcp::send_packet(pip_tcp_packet *packet) {
     packet->sended();
     tcphdr * hdr = packet->get_hdr();
     pip_uint16 datalen = packet->get_payload_len();
-    pip_netif::shared()->output(packet->get_head_buf(), IPPROTO_TCP, this->dest_ip, this->src_ip);
+    pip_netif::shared()->output(packet->get_head_buf(), IPPROTO_TCP, this->ip_header->dest, this->ip_header->src);
     
     this->_last_ack = ntohl(hdr->th_ack);
     
@@ -370,7 +364,7 @@ void pip_tcp::send_packet(pip_tcp_packet *packet) {
 void
 pip_tcp::resend_packet(pip_tcp_packet *packet) {
     packet->sended();
-    pip_netif::shared()->output(packet->get_head_buf(), IPPROTO_TCP, this->dest_ip, this->src_ip);
+    pip_netif::shared()->output(packet->get_head_buf(), IPPROTO_TCP, this->ip_header->dest, this->ip_header->src);
     
 #if PIP_DEBUG
     pip_debug_output_tcp(this, packet, "tcp_resend");
@@ -586,32 +580,28 @@ void pip_tcp::handle_receive(void *data, pip_uint16 datalen) {
 }
 
 // MARK: - Input
-void pip_tcp::input(const void * bytes, struct ip *ip) {
+void pip_tcp::input(const void * bytes, pip_ip_header * ip_header) {
     struct tcphdr *hdr = (struct tcphdr *)bytes;
     
-    pip_uint16 datalen = htons(ip->ip_len) - (ip->ip_hl * 4 + hdr->th_off * 4);
+    pip_uint16 datalen = ip_header->datalen - hdr->th_off * 4 - ip_header->headerlen;
     pip_uint16 dport = ntohs(hdr->th_dport);
+    pip_uint16 sport = ntohs(hdr->th_sport);
+    
     if (!(dport >= 1 && dport <= 65535)) {
+        delete ip_header;
         return;
     }
     
-    pip_uint32 iden = ip->ip_src.s_addr ^ ip->ip_dst.s_addr ^ dport ^ ntohs(hdr->th_sport);
+    pip_uint32 iden = ip_header->src ^ ip_header->dest ^ dport ^ sport;
     pip_tcp * tcp = fetch_tcp_connection(iden);
     
     if (tcp == NULL && hdr->th_flags & TH_SYN && tcp_connections.size() < PIP_TCP_MAX_CONNS) {
         tcp = new pip_tcp;
         tcp->_iden = iden;
         
-        tcp->src_ip = ntohl(ip->ip_src.s_addr);
-        tcp->dest_ip = ntohl(ip->ip_dst.s_addr);
+        tcp->ip_header = ip_header;
         
-        tcp->src_ip_str = (char *)calloc(15, sizeof(char));
-        strcpy(tcp->src_ip_str, inet_ntoa(ip->ip_src));
-        
-        tcp->dest_ip_str = (char *)calloc(15, sizeof(char));
-        strcpy(tcp->dest_ip_str, inet_ntoa(ip->ip_dst));
-        
-        tcp->src_port = ntohs(hdr->th_sport);
+        tcp->src_port = sport;
         tcp->dest_port = dport;
         
         tcp_connections[iden] = tcp;
@@ -625,13 +615,13 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
     if (tcp == NULL) {
         
         if (hdr->th_flags & TH_RST) {
+            delete ip_header;
         } else {
             // 不存在的连接 直接返回RST
             tcp = new pip_tcp;
             tcp->_iden = iden;
             
-            tcp->src_ip = ntohl(ip->ip_src.s_addr);
-            tcp->dest_ip = ntohl(ip->ip_dst.s_addr);
+            tcp->ip_header = ip_header;
             
             tcp->src_port = ntohs(hdr->th_sport);
             tcp->dest_port = dport;
@@ -646,10 +636,15 @@ void pip_tcp::input(const void * bytes, struct ip *ip) {
             tcp->release("pip_tcp::input no exist");
             delete tcp;
         }
+        
 #if PIP_DEBUG
         printf("未获取到TCP连接\n");
 #endif
         return;
+    }
+    
+    if (tcp->ip_header != ip_header) {
+        delete ip_header;
     }
     
     if (hdr->th_flags == TH_ACK && ntohl(hdr->th_seq) == tcp->ack - 1) {
@@ -812,7 +807,8 @@ pip_tcp_packet(pip_tcp *tcp, pip_uint8 flags, pip_buf * option_buf, pip_buf * pa
     
     if (true) {
         // 计算校验和
-        pip_uint16 checksum = pip_inet_checksum_buf(head_buf, IPPROTO_TCP, tcp->dest_ip, tcp->src_ip);
+        
+        pip_uint16 checksum = pip_inet_checksum_buf(head_buf, IPPROTO_TCP, tcp->ip_header->dest, tcp->ip_header->src);
         checksum = htons(checksum);
         memcpy(buffer + checksum_offset, &checksum, sizeof(pip_uint16));
     }

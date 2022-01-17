@@ -75,9 +75,13 @@ void pip_debug_output_tcp(pip_tcp * tcp, struct tcphdr *hdr, pip_uint32 datalen,
         return;
     }
     
+    pip_ip_header * ip_header = tcp->ip_header;
     pip_debug_output_iden(iden);
-    printf("src %s port %u\n", tcp->src_ip_str, tcp->src_port);
-    printf("dst %s port %u\n", tcp->dest_ip_str, tcp->dest_port);
+    if (ip_header) {
+        printf("src %s port %u\n", ip_header->src_str, tcp->src_port);
+        printf("dst %s port %u\n", ip_header->dest_str, tcp->dest_port);
+    }
+    
     printf("iden: %u\n", tcp->get_iden());
     
     printf("flags: ");

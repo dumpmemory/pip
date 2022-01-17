@@ -10,6 +10,7 @@
 #include "pip_type.hpp"
 #include "pip_queue.hpp"
 #include "pip_buf.hpp"
+#include "pip_ip_header.hpp"
 
 class pip_tcp_packet;
 class pip_tcp;
@@ -33,7 +34,7 @@ class pip_tcp {
     void release(const char * debug_info);
 public:
     
-    static void input(const void * bytes, struct ip *ip);
+    static void input(const void * bytes, pip_ip_header * ip_header);
     static void timer_tick();
     
     /// 获取当前连接数
@@ -73,11 +74,7 @@ public:
     pip_tcp_written_callback written_callback;
     
 public:
-    pip_uint32 src_ip;
-    char * src_ip_str;
-    
-    pip_uint32 dest_ip;
-    char * dest_ip_str;
+    pip_ip_header * ip_header;
     
     pip_uint16 src_port;
     pip_uint16 dest_port;

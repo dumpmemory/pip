@@ -10,12 +10,7 @@
 #include "pip_netif.hpp"
 #include "pip_checksum.hpp"
 
-void pip_udp::input(const void *bytes, struct ip *ip) {
-    
-    char * src_ip = (char *)calloc(15, sizeof(char));
-    char * dest_ip = (char *)calloc(15, sizeof(char));
-    strcpy(src_ip, inet_ntoa(ip->ip_src));
-    strcpy(dest_ip, inet_ntoa(ip->ip_dst));
+void pip_udp::input(const void *bytes, pip_ip_header * ip_header) {
     
     struct udphdr *hdr = (struct udphdr *)bytes;
     
@@ -27,15 +22,14 @@ void pip_udp::input(const void *bytes, struct ip *ip) {
     
     pip_netif * netif = pip_netif::shared();
     if (netif->received_udp_data_callback) {
-        netif->received_udp_data_callback(netif, data, datalen, src_ip, src_port, dest_ip, dest_port);
+        netif->received_udp_data_callback(netif, data, datalen, ip_header->src_str, src_port, ip_header->dest_str, dest_port, ip_header->version);
     }
     
 #if PIP_DEBUG
     pip_debug_output_udp(hdr, "udp_input");
 #endif
     
-    free(src_ip);
-    free(dest_ip);
+    delete ip_header;
 }
 
 void pip_udp::output(const void *buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port) {

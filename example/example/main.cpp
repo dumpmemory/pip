@@ -17,7 +17,7 @@ void _pip_netif_output_ip_data_callback (pip_netif * netif, pip_buf * buf) {
 /// 接受到TCP连接
 void _pip_netif_new_tcp_connect_callback (pip_netif * netif, pip_tcp * tcp, const void * take_data, pip_uint16 take_data_len) {
     std::cout << "_pip_netif_new_tcp_connect_callback" << std::endl;
-    std::cout << "tcp: " << tcp->src_ip_str << ":" << tcp->src_port << " <--> " << tcp->dest_ip_str << ":" << tcp->dest_port << std::endl;
+    std::cout << "tcp: " << tcp->ip_header->src_str << ":" << tcp->src_port << " <--> " << tcp->ip_header->dest_str << ":" << tcp->dest_port << std::endl;
     std::cout << std::endl;
     /// 回应连接
     tcp->connected(take_data);
@@ -25,7 +25,7 @@ void _pip_netif_new_tcp_connect_callback (pip_netif * netif, pip_tcp * tcp, cons
 }
 
 /// 接受到UDP包
-void _pip_netif_received_udp_data_callback(pip_netif * netif, void * buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port) {
+void _pip_netif_received_udp_data_callback(pip_netif * netif, void * buffer, pip_uint16 buffer_len, const char * src_ip, pip_uint16 src_port, const char * dest_ip, pip_uint16 dest_port, pip_uint8 version) {
     
     std::cout << "_pip_netif_received_udp_data_callback" << std::endl;
     std::cout << "udp: " << src_ip << ":" << src_port << " <--> " << dest_ip << ":" << dest_port << std::endl;
