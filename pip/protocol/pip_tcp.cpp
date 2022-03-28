@@ -393,8 +393,9 @@ void pip_tcp::handle_ack(pip_uint32 ack) {
         pip_tcp_packet * pkt = this->_packet_queue->front();
         struct tcphdr * hdr = pkt->get_hdr();
         
+        pip_uint32 seq = ntohl(hdr->th_seq) + pkt->get_payload_len();
         
-        if (hdr == NULL || is_before_seq(ntohl(hdr->th_seq), ack) == false) {
+        if (hdr == NULL || is_before_seq(seq, ack) == false) {
 #if PIP_DEBUG
             if (hdr)
                 printf("break seq: %d ack: %d\n", ntohl(hdr->th_seq), ack);
@@ -516,8 +517,8 @@ void pip_tcp::handle_syn(void * options, pip_uint16 optionlen) {
         // mss
         pip_uint8 kind = 2;
         pip_uint8 len = 4;
-        pip_uint16 value = htons(this->mss);
-        
+        pip_uint16 value = htons(PIP_MIN(this->mss, this->opp_mss));
+
         memcpy(optionBuffer, &kind, 1);
         memcpy(optionBuffer + 1, &len, 1);
         memcpy(optionBuffer + 2, &value, 2);
